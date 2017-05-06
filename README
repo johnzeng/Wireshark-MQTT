@@ -1,6 +1,8 @@
 Wireshark-MQTT
 ===========================
 
+云巴MQTT解码器，针对云巴的拓展命令字和64位id做了兼容
+
 MQTT dissector for Wireshark was developed for debugging
 libemqtt (https://github.com/menudoproblema/libemqtt)
 
@@ -14,6 +16,7 @@ $ wireshark -X lua_script:mqtt.lua
 If you want to install this as a plugin just copy the mqtt.lua to 
 a wireshark plugin folder.
 In windows this could be %APPDATA%\Wireshark\plugins
+In unix this could be $HOME/.config/wireshark/plugins 
 
 
 
