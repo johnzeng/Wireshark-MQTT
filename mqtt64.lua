@@ -17,8 +17,13 @@
 --
 
 do
+
 	-- Create a new dissector
 	MQTTPROTO = Proto("MQTT64", "MQ Telemetry Transport on 64Bits MessageId")
+
+
+    global_mqtt_version_map = {}
+
 	local f = MQTTPROTO.fields
 	-- Fix header: byte 1
 	f.message_type = ProtoField.uint8("mqtt64.message_type", "Message Type", base.HEX, nil, 0xF0)
@@ -61,6 +66,18 @@ do
 	--
 	f.payload_data = ProtoField.bytes("mqtt64.payload", "Payload Data")
 
+	-- ext
+	f.ext_status = ProtoField.string("mqtt64.ext.status", "Status")
+	f.ext_data = ProtoField.string("mqtt64.ext.data", "Ext Data")
+	f.ext_command = ProtoField.string("mqtt64.ext.comand", "Command name")
+	f.ext_payload_length = ProtoField.uint64("mqtt64.ext.payload_length", "ext payload lenght")
+	f.ext_message_id = ProtoField.uint64("mqtt64.ext.message_id", "Ext Message ID")
+    f.ext_publish_value = ProtoField.string("mqtt64.ext.publish_values", "value")
+    f.ext_publish_key = ProtoField.string("mqtt64.ext.publish_key", "new publish key")
+
+    local f_tcp_stream = Field.new("tcp.stream")
+    mqtt_version_map = {}
+
 	-- decoding of fixed header remaining length
 	-- according to MQTT V3.1
 	function lengthDecode(buffer, offset)
@@ -94,6 +111,39 @@ do
 		msg_types[12] = "PINGREQ"
 		msg_types[13] = "PINGRESP"
 		msg_types[14] = "DISCONNECT"
+		msg_types[15] = "EXT CMD"
+
+		local new_publish_types = { 1, 2, 3, 4, 5, 6, 7, 8}
+		new_publish_types[0] = "TOPIC"
+		new_publish_types[1] = "PAYLOAD"
+		new_publish_types[2] = "PLATFORM"
+		new_publish_types[3] = "TTL"
+		new_publish_types[4] = "TIMEDELAY"
+		new_publish_types[5] = "LOCATION"
+		new_publish_types[6] = "QOS"
+		new_publish_types[7] = "APNS_JSON"
+		new_publish_types[8] = "THIRD_PARTY_PUSH"
+
+        local ext_cmd_type = { -1, 1, 2, 3, 13, 4, 14, 5, 15, 6, 16, 7, 8, 9, 19, 10, 20, 11 }
+        ext_cmd_type[-1] = "CMD_UNKOWN"
+        ext_cmd_type[1] = "CMD_GET_ALIAS"
+        ext_cmd_type[2] = "CMD_GET_ALIAS_ACK"
+        ext_cmd_type[3] = "CMD_GET_TOPIC_LIST"
+        ext_cmd_type[13] = "CMD_GET_TOPIC_LIST2"
+        ext_cmd_type[4] = "CMD_GET_TOPIC_LIST_ACK"
+        ext_cmd_type[14] = "CMD_GET_TOPIC_LIST_ACK2"
+        ext_cmd_type[5] = "CMD_GET_ALIASLIST"
+        ext_cmd_type[15] = "CMD_GET_ALIASLIST2"
+        ext_cmd_type[6] = "CMD_GET_ALIASLIST_ACK"
+        ext_cmd_type[16] = "CMD_GET_ALIASLIST_ACK2"
+        ext_cmd_type[7] = "CMD_PUBLISH2"
+        ext_cmd_type[8] = "CMD_PUBLISH2_ACK"
+        ext_cmd_type[9] = "CMD_GET_STATUS"
+        ext_cmd_type[19] = "CMD_GET_STATUS2"
+        ext_cmd_type[10] = "CMD_GET_STATUS_ACK"
+        ext_cmd_type[20] = "CMD_GET_STATUS_ACK2"
+        ext_cmd_type[11] = "CMD_RECVACK"
+
 
 		local msgtype = buffer(0, 1)
 
@@ -107,7 +157,9 @@ do
 		local fixheader_subtree = subtree:add("Fixed Header", nil)
 
 		subtree:append_text(", Message Type: " .. msg_types[msgindex])
-		pinfo.cols.info:set(msg_types[msgindex])
+		local old_info = pinfo.cols.info
+        local new_info = "[MQTT " .. msg_types[msgindex] .. "] "  .. "------> " .. tostring(old_info)
+        pinfo.cols.info:set(new_info)
 
 		fixheader_subtree:add(f.message_type, msgtype)
 		fixheader_subtree:add(f.dup, msgtype)
@@ -120,6 +172,7 @@ do
 		subtree:append_text(", QoS: " .. fixhdr_qos)
 
 		if(msgindex == 1) then -- CONNECT
+
 			local varheader_subtree = subtree:add("Variable Header", nil)
 
 			local name_len = buffer(offset, 2):uint()
@@ -135,6 +188,11 @@ do
 
 			varheader_subtree:add(f.connect_protocol_name, name)
 			varheader_subtree:add(f.connect_protocol_version, version)
+
+            local f_stream = f_tcp_stream().value
+            mqtt_version_map[f_stream] = tostring(version)
+
+            global_mqtt_version = version
 
 			local flags_subtree = varheader_subtree:add("Flags", nil)
 			flags_subtree:add(f.connect_username, flags)
@@ -172,19 +230,26 @@ do
 
 
 		elseif(msgindex == 3) then -- PUBLISH
+            local f_stream = f_tcp_stream().value
+            local version_num = mqtt_version_map[f_stream]
+
 			local varhdr_init = offset -- For calculating variable header size
 			local varheader_subtree = subtree:add("Variable Header", nil)
 
-			local topic_len = buffer(offset, 2):uint()
-			offset = offset + 2
+            local topic_len = buffer(offset, 2):uint()
+            offset = offset + 2
 			local topic = buffer(offset, topic_len)
 			offset = offset + topic_len
 
 			varheader_subtree:add(f.publish_topic, topic)
 
 			if(fixhdr_qos > 0) then
-				local message_id = buffer(offset, 8)
-				offset = offset + 8
+                local message_id_length = 2
+                if (version_num == "13") then
+                    message_id_length = 8
+                end
+                local message_id = buffer(offset, message_id_length)
+                offset = offset + message_id_length
 				varheader_subtree:add(f.publish_message_id, message_id)
 			end
 
@@ -199,8 +264,15 @@ do
 		elseif(msgindex == 8 or msgindex == 10) then -- SUBSCRIBE & UNSUBSCRIBE
 			local varheader_subtree = subtree:add("Variable Header", nil)
 
-			local message_id = buffer(offset, 8)
-			offset = offset + 8
+            local f_stream = f_tcp_stream().value
+            local version_num = mqtt_version_map[f_stream]
+
+            local message_id_length = 2
+            if (version_num == "13") then
+                message_id_length = 8
+            end
+			local message_id = buffer(offset, message_id_length)
+			offset = offset + message_id_length
 			varheader_subtree:add(f.subscribe_message_id, message_id)
 
 			local payload_subtree = subtree:add("Payload", nil)
@@ -221,8 +293,15 @@ do
 		elseif(msgindex == 9 or msgindex == 11) then -- SUBACK & UNSUBACK
 			local varheader_subtree = subtree:add("Variable Header", nil)
 
-			local message_id = buffer(offset, 8)
-			offset = offset + 8
+            local f_stream = f_tcp_stream().value
+            local version_num = mqtt_version_map[f_stream]
+
+            local message_id_length = 2
+            if (version_num == "13") then
+                message_id_length = 8
+            end
+			local message_id = buffer(offset, message_id_length)
+			offset = offset + message_id_length
 			varheader_subtree:add(f.suback_message_id, message_id)
 
 			local payload_subtree = subtree:add("Payload", nil)
@@ -231,6 +310,53 @@ do
 				offset = offset + 1
 				payload_subtree:add(f.suback_qos, qos);
 			end
+
+		elseif(msgindex == 15) then -- EXT CMD
+			local varhdr_init = offset -- For calculating variable header size
+			local varheader_subtree = subtree:add("Variable Header", nil)
+
+            --this ext command is set to 8 bytes
+            local message_id = buffer(offset, 8)
+            offset = offset + 8
+			varheader_subtree:add(f.ext_message_id, message_id)
+
+
+			local payload_subtree = subtree:add("Payload", nil)
+			-- Data
+			local command_name = buffer(offset, 1)
+			offset = offset + 1
+
+			payload_subtree:add(f.ext_command, ext_cmd_type[command_name:uint()])
+
+			if(command_name:uint() == 11) then -- ext_ack
+				local ret_status = buffer(offset, 1)
+				offset = offset + 1
+				payload_subtree:add(f.ext_status, ret_status)
+			end
+
+			local data_len = buffer(offset, 2):uint()
+            offset = offset + 2
+            if(command_name:uint() == 7)then -- new_publish_tlv
+                while (offset < buffer:len()) do
+
+                    local publish_type = buffer(offset, 1)
+                    offset = offset + 1
+
+                    local new_publish_subtree = payload_subtree:add(new_publish_types[publish_type:uint()], nil)
+
+                    local value_lenght = buffer(offset, 2)
+                    offset = offset + 2
+
+                    local ext_value = buffer(offset, value_lenght:uint())
+                    new_publish_subtree:add(f.ext_publish_value, ext_value)
+                    offset = offset + value_lenght:uint()
+                end
+            else
+                local data = buffer(offset, data_len)
+                offset = offset + data_len
+
+                payload_subtree:add(f.ext_data, data)
+            end
 
 		else
 			if((buffer:len()-offset) > 0) then
