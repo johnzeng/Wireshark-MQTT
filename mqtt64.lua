@@ -49,6 +49,7 @@ do
 
 	-- Publish
 	f.publish_topic = ProtoField.string("mqtt64.publish.topic", "Topic")
+	f.topic_len = ProtoField.int16("mqtt64.publish.topic_len", "TopicLength")
 	f.publish_message_id = ProtoField.uint64("mqtt64.publish.message_id", "Message ID")
 	f.publish_data = ProtoField.string("mqtt64.publish.data", "Data")
 
@@ -72,8 +73,19 @@ do
 	f.ext_command = ProtoField.string("mqtt64.ext.comand", "Command name")
 	f.ext_payload_length = ProtoField.uint64("mqtt64.ext.payload_length", "ext payload lenght")
 	f.ext_message_id = ProtoField.uint64("mqtt64.ext.message_id", "Ext Message ID")
-    f.ext_publish_value = ProtoField.string("mqtt64.ext.publish_values", "value")
-    f.ext_publish_key = ProtoField.string("mqtt64.ext.publish_key", "new publish key")
+    f.ext_publish_topic = ProtoField.string("mqtt64.ext.publish_key.topic", "new publish key")
+
+    local new_publish_types = { 1, 2, 3, 4, 5, 6, 7, 8}
+    -- new_publish_types[0] = "TOPIC"
+    new_publish_types[0] = ProtoField.string("mqtt64.ext.publish_key.topic", "Topic")
+    new_publish_types[1] = "PAYLOAD"
+    new_publish_types[2] = "PLATFORM"
+    new_publish_types[3] = "TTL"
+    new_publish_types[4] = "TIMEDELAY"
+    new_publish_types[5] = "LOCATION"
+    new_publish_types[6] = "QOS"
+    new_publish_types[7] = "APNS_JSON"
+    new_publish_types[8] = "THIRD_PARTY_PUSH"
 
     local f_tcp_stream = Field.new("tcp.stream")
     mqtt_version_map = {}
@@ -113,16 +125,6 @@ do
 		msg_types[14] = "DISCONNECT"
 		msg_types[15] = "EXT CMD"
 
-		local new_publish_types = { 1, 2, 3, 4, 5, 6, 7, 8}
-		new_publish_types[0] = "TOPIC"
-		new_publish_types[1] = "PAYLOAD"
-		new_publish_types[2] = "PLATFORM"
-		new_publish_types[3] = "TTL"
-		new_publish_types[4] = "TIMEDELAY"
-		new_publish_types[5] = "LOCATION"
-		new_publish_types[6] = "QOS"
-		new_publish_types[7] = "APNS_JSON"
-		new_publish_types[8] = "THIRD_PARTY_PUSH"
 
         local ext_cmd_type = { -1, 1, 2, 3, 13, 4, 14, 5, 15, 6, 16, 7, 8, 9, 19, 10, 20, 11 }
         ext_cmd_type[-1] = "CMD_UNKOWN"
@@ -158,7 +160,7 @@ do
 
 		subtree:append_text(", Message Type: " .. msg_types[msgindex])
 		local old_info = pinfo.cols.info
-        local new_info = "[MQTT " .. msg_types[msgindex] .. "] "  .. "------> " .. tostring(old_info)
+        local new_info = "[MQTT " .. msg_types[msgindex] .. "] "  .. " ------ " .. tostring(old_info)
         pinfo.cols.info:set(new_info)
 
 		fixheader_subtree:add(f.message_type, msgtype)
@@ -215,6 +217,7 @@ do
 			if(flags:bitfield(0) == 1) then -- Username flag is true
 				local username_len = buffer(offset, 2):uint()
 				offset = offset + 2
+                payload_subtree:add("username_len", tostring(username_len))
 				local username = buffer(offset, username_len)
 				offset = offset + username_len
 				payload_subtree:add(f.connect_payload_username, username)
@@ -223,6 +226,7 @@ do
 			if(flags:bitfield(1) == 1) then -- Password flag is true
 				local password_len = buffer(offset, 2):uint()
 				offset = offset + 2
+                payload_subtree:add("password_len", tostring(password_len))
 				local password = buffer(offset, password_len)
 				offset = offset + password_len
 				payload_subtree:add(f.connect_payload_password, password)
@@ -244,9 +248,9 @@ do
 			varheader_subtree:add(f.publish_topic, topic)
 
 			if(fixhdr_qos > 0) then
-                local message_id_length = 2
-                if (version_num == "13") then
-                    message_id_length = 8
+                local message_id_length = 8
+                if (version_num ~= "13") then
+                    message_id_length = 2
                 end
                 local message_id = buffer(offset, message_id_length)
                 offset = offset + message_id_length
@@ -267,9 +271,9 @@ do
             local f_stream = f_tcp_stream().value
             local version_num = mqtt_version_map[f_stream]
 
-            local message_id_length = 2
-            if (version_num == "13") then
-                message_id_length = 8
+            local message_id_length = 8
+            if (version_num ~= "13") then
+                message_id_length = 2
             end
 			local message_id = buffer(offset, message_id_length)
 			offset = offset + message_id_length
@@ -281,12 +285,14 @@ do
 				offset = offset + 2
 				local topic = buffer(offset, topic_len)
 				offset = offset + topic_len
-				local qos = buffer(offset, 1)
-				offset = offset + 1
 
-				payload_subtree:add(f.subscribe_topic, topic)
+                local topic_subtree = payload_subtree:add(f.subscribe_topic, topic)
+--				topic_subtree:add(f.subscribe_topic, topic)
+                topic_subtree:add(f.topic_len, topic_len)
 				if(msgindex == 8) then -- QoS byte only for subscription
-					payload_subtree:add(f.subscribe_qos, qos)
+                    local qos = buffer(offset, 1)
+                    offset = offset + 1
+					topic_subtree:add(f.subscribe_qos, qos)
 				end
 			end
 
@@ -296,9 +302,9 @@ do
             local f_stream = f_tcp_stream().value
             local version_num = mqtt_version_map[f_stream]
 
-            local message_id_length = 2
-            if (version_num == "13") then
-                message_id_length = 8
+            local message_id_length = 8
+            if (version_num ~= "13") then
+                message_id_length = 2
             end
 			local message_id = buffer(offset, message_id_length)
 			offset = offset + message_id_length
@@ -336,19 +342,19 @@ do
 
 			local data_len = buffer(offset, 2):uint()
             offset = offset + 2
+            payload_subtree:add("data lenght", data_len)
             if(command_name:uint() == 7)then -- new_publish_tlv
                 while (offset < buffer:len()) do
 
                     local publish_type = buffer(offset, 1)
                     offset = offset + 1
 
-                    local new_publish_subtree = payload_subtree:add(new_publish_types[publish_type:uint()], nil)
 
                     local value_lenght = buffer(offset, 2)
                     offset = offset + 2
 
                     local ext_value = buffer(offset, value_lenght:uint())
-                    new_publish_subtree:add(f.ext_publish_value, ext_value)
+                    payload_subtree:add(new_publish_types[publish_type:uint()], ext_value)
                     offset = offset + value_lenght:uint()
                 end
             else
