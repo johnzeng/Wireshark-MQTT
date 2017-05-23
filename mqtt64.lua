@@ -68,10 +68,11 @@ do
 	f.payload_data = ProtoField.bytes("mqtt64.payload", "Payload Data")
 
 	-- ext
-	f.ext_status = ProtoField.string("mqtt64.ext.status", "Status")
+	f.ext_status = ProtoField.uint8("mqtt64.ext.status", "Status")
 	f.ext_data = ProtoField.string("mqtt64.ext.data", "Ext Data")
 	f.ext_command = ProtoField.string("mqtt64.ext.comand", "Command name")
-	f.ext_payload_length = ProtoField.uint64("mqtt64.ext.payload_length", "ext payload lenght")
+	f.ext_command_code = ProtoField.uint8("mqtt64.ext.comand_code", "Command code")
+	f.ext_payload_length = ProtoField.uint16("mqtt64.ext.payload_length", "ext payload lenght")
 	f.ext_message_id = ProtoField.uint64("mqtt64.ext.message_id", "Ext Message ID")
     f.ext_publish_topic = ProtoField.string("mqtt64.ext.publish_key.topic", "new publish key")
 
@@ -333,22 +334,22 @@ do
 			offset = offset + 1
 
 			payload_subtree:add(f.ext_command, ext_cmd_type[command_name:uint()])
+			payload_subtree:add(f.ext_command_code, command_name)
 
-			if(command_name:uint() == 11) then -- ext_ack
+			if(command_name:uint() % 2 == 0) then -- ext_ack
 				local ret_status = buffer(offset, 1)
 				offset = offset + 1
 				payload_subtree:add(f.ext_status, ret_status)
 			end
 
-			local data_len = buffer(offset, 2):uint()
+			local data_len = buffer(offset, 2)
             offset = offset + 2
-            payload_subtree:add("data lenght", data_len)
+            payload_subtree:add(f.ext_payload_length, data_len)
             if(command_name:uint() == 7)then -- new_publish_tlv
                 while (offset < buffer:len()) do
 
                     local publish_type = buffer(offset, 1)
                     offset = offset + 1
-
 
                     local value_lenght = buffer(offset, 2)
                     offset = offset + 2
@@ -358,8 +359,8 @@ do
                     offset = offset + value_lenght:uint()
                 end
             else
-                local data = buffer(offset, data_len)
-                offset = offset + data_len
+                local data = buffer(offset, data_len:uint())
+                offset = offset + data_len:uint()
 
                 payload_subtree:add(f.ext_data, data)
             end
