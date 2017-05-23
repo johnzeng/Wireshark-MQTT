@@ -47,6 +47,9 @@ do
 	f.connect_payload_username = ProtoField.string("mqtt64.connect.payload.username", "Username")
 	f.connect_payload_password = ProtoField.string("mqtt64.connect.payload.password", "Password")
 
+	f.connack_flags_reseverd = ProtoField.uint8("mqtt64.connack.resverd", "resverd", base.DEC, nil, 0xFE)
+	f.connack_flags_present = ProtoField.uint8("mqtt64.connack.present", "present", base.DEC, nil, 0x01)
+	f.connack_status_code = ProtoField.uint8("mqtt64.connack.status", "status code")
 	-- Publish
 	f.publish_topic = ProtoField.string("mqtt64.publish.topic", "Topic")
 	f.topic_len = ProtoField.int16("mqtt64.publish.topic_len", "TopicLength")
@@ -74,19 +77,27 @@ do
 	f.ext_command_code = ProtoField.uint8("mqtt64.ext.comand_code", "Command code")
 	f.ext_payload_length = ProtoField.uint16("mqtt64.ext.payload_length", "ext payload lenght")
 	f.ext_message_id = ProtoField.uint64("mqtt64.ext.message_id", "Ext Message ID")
-    f.ext_publish_topic = ProtoField.string("mqtt64.ext.publish_key.topic", "new publish key")
+    f.ext_publish_topic = ProtoField.string("mqtt64.ext.publish_key.topic", "Topic")
+    f.ext_publish_payload = ProtoField.string("mqtt64.ext.publish_key.payload", "Payload")
+    f.ext_publish_qos = ProtoField.string("mqtt64.ext.publish_key.qos", "QoS")
+    f.ext_publish_ttl = ProtoField.string("mqtt64.ext.publish_key.ttl", "TTL")
+    f.ext_publish_delay = ProtoField.string("mqtt64.ext.publish_key.delay", "Time delay")
+    f.ext_publish_location = ProtoField.string("mqtt64.ext.publish_key.location", "Location")
+    f.ext_publish_apns_json = ProtoField.string("mqtt64.ext.publish_key.apns_json", "Apns Json")
+    f.ext_publish_third_party_push = ProtoField.string("mqtt64.ext.publish_key.third_party_json", "Third party Json")
+    f.ext_publish_platform = ProtoField.string("mqtt64.ext.publish_key.platform", "platform")
 
     local new_publish_types = { 1, 2, 3, 4, 5, 6, 7, 8}
     -- new_publish_types[0] = "TOPIC"
-    new_publish_types[0] = ProtoField.string("mqtt64.ext.publish_key.topic", "Topic")
-    new_publish_types[1] = "PAYLOAD"
-    new_publish_types[2] = "PLATFORM"
-    new_publish_types[3] = "TTL"
-    new_publish_types[4] = "TIMEDELAY"
-    new_publish_types[5] = "LOCATION"
-    new_publish_types[6] = "QOS"
-    new_publish_types[7] = "APNS_JSON"
-    new_publish_types[8] = "THIRD_PARTY_PUSH"
+    new_publish_types[0] = f.ext_publish_topic
+    new_publish_types[1] = f.ext_publish_payload
+    new_publish_types[2] = f.ext_publish_platform
+    new_publish_types[3] = f.ext_publish_ttl
+    new_publish_types[4] = f.ext_publish_delay
+    new_publish_types[5] = f.ext_publish_location
+    new_publish_types[6] = f.ext_publish_qos
+    new_publish_types[7] = f.ext_publish_apns_json
+    new_publish_types[8] = f.ext_publish_third_party_push
 
     local f_tcp_stream = Field.new("tcp.stream")
     mqtt_version_map = {}
@@ -233,6 +244,17 @@ do
 				payload_subtree:add(f.connect_payload_password, password)
 			end
 
+		elseif(msgindex == 2) then -- CONNACK 
+            local connect_acknowlege_flags = buffer(offset, 1)
+            offset = offset + 1
+			local varheader_subtree = subtree:add("Variable Header", nil)
+			local flags_subtree = varheader_subtree:add("Ack Flags", nil)
+			flags_subtree:add(f.connack_flags_reseverd, connect_acknowlege_flags)
+			flags_subtree:add(f.connack_flags_present, connect_acknowlege_flags)
+
+            local connect_return_code = buffer(offset, 1)
+            offset = offset + 1
+			local flags_subtree = varheader_subtree:add(f.connack_status_code, connect_return_code)
 
 		elseif(msgindex == 3) then -- PUBLISH
             local f_stream = f_tcp_stream().value
@@ -288,7 +310,6 @@ do
 				offset = offset + topic_len
 
                 local topic_subtree = payload_subtree:add(f.subscribe_topic, topic)
---				topic_subtree:add(f.subscribe_topic, topic)
                 topic_subtree:add(f.topic_len, topic_len)
 				if(msgindex == 8) then -- QoS byte only for subscription
                     local qos = buffer(offset, 1)
