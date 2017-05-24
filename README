@@ -1,7 +1,7 @@
 Wireshark-MQTT
 ===========================
 
-云巴MQTT解码器，针对云巴的拓展命令字和64位id做了兼容
+云巴MQTT解码器，针对云巴的拓展命令字和64位id做了兼容，目前已经全部支持云巴协议。
 
 MQTT dissector for Wireshark was developed for debugging
 libemqtt (https://github.com/menudoproblema/libemqtt)

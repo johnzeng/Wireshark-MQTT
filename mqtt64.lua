@@ -172,7 +172,7 @@ do
 
 		subtree:append_text(", Message Type: " .. msg_types[msgindex])
 		local old_info = pinfo.cols.info
-        local new_info = "[MQTT " .. msg_types[msgindex] .. "] "  .. " ------ " .. tostring(old_info)
+        local new_info = "[MQTT " .. msg_types[msgindex] .. "]"  .. " ------ " .. tostring(old_info)
         pinfo.cols.info:set(new_info)
 
 		fixheader_subtree:add(f.message_type, msgtype)
