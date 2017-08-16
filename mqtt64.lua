@@ -139,6 +139,8 @@ do
 
 
         local ext_cmd_type = { -1, 1, 2, 3, 13, 4, 14, 5, 15, 6, 16, 7, 8, 9, 19, 10, 20, 11 }
+        local is_ext_ack = {}
+
         ext_cmd_type[-1] = "CMD_UNKOWN"
         ext_cmd_type[1] = "CMD_GET_ALIAS"
         ext_cmd_type[2] = "CMD_GET_ALIAS_ACK"
@@ -157,6 +159,25 @@ do
         ext_cmd_type[10] = "CMD_GET_STATUS_ACK"
         ext_cmd_type[20] = "CMD_GET_STATUS_ACK2"
         ext_cmd_type[11] = "CMD_RECVACK"
+
+        is_ext_ack[-1] = 0
+        is_ext_ack[1] = 0
+        is_ext_ack[2] = 1
+        is_ext_ack[3] = 0
+        is_ext_ack[13] = 0
+        is_ext_ack[4] = 1
+        is_ext_ack[14] = 1
+        is_ext_ack[5] = 0
+        is_ext_ack[15] = 0
+        is_ext_ack[6] = 1
+        is_ext_ack[16] = 1
+        is_ext_ack[7] = 0
+        is_ext_ack[8] = 1
+        is_ext_ack[9] = 0
+        is_ext_ack[19] = 0
+        is_ext_ack[10] = 1
+        is_ext_ack[20] = 1
+        is_ext_ack[11] = 1
 
 
         local total_offset = 0
@@ -361,7 +382,7 @@ do
                 payload_subtree:add(f.ext_command, ext_cmd_type[command_name:uint()])
                 payload_subtree:add(f.ext_command_code, command_name)
 
-                if(command_name:uint() % 2 == 0) then -- ext_ack
+                if(is_ext_ack[command_name:uint()] == 1) then -- ext_ack
                     local ret_status = buffer(offset, 1)
                     offset = offset + 1
                     payload_subtree:add(f.ext_status, ret_status)
