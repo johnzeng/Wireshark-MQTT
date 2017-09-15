@@ -100,7 +100,6 @@ do
     new_publish_types[8] = f.ext_publish_third_party_push
 
     local f_tcp_stream = Field.new("tcp.stream")
-    mqtt_version_map = {}
 
 	-- decoding of fixed header remaining length
 	-- according to MQTT V3.1
@@ -229,7 +228,6 @@ do
                 varheader_subtree:add(f.connect_protocol_version, version)
 
                 local f_stream = f_tcp_stream().value
-                mqtt_version_map[f_stream] = tostring(version)
 
                 global_mqtt_version = version
 
@@ -283,7 +281,6 @@ do
 
             elseif(msgindex == 3) then -- PUBLISH
                 local f_stream = f_tcp_stream().value
-                local version_num = mqtt_version_map[f_stream]
 
                 local varhdr_init = offset -- For calculating variable header size
                 local varheader_subtree = subtree:add("Variable Header", nil)
@@ -297,9 +294,6 @@ do
 
                 if(fixhdr_qos > 0) then
                     local message_id_length = 8
-                    if (version_num ~= "13") then
-                        message_id_length = 2
-                    end
                     local message_id = buffer(offset, message_id_length)
                     offset = offset + message_id_length
                     varheader_subtree:add(f.publish_message_id, message_id)
@@ -311,18 +305,22 @@ do
                 local data = buffer(offset, data_len)
                 offset = offset + data_len
                 payload_subtree:add(f.publish_data, data)
+            elseif(msgindex == 4 or msgindex == 5 or msgindex == 6 or msgindex == 7) then -- PUBACK or PUBREC or PUBREL or PUBCOMP
+                local f_stream = f_tcp_stream().value
 
+                local varhdr_init = offset -- For calculating variable header size
+                local varheader_subtree = subtree:add("Variable Header", nil)
 
+                local message_id_length = 8
+                local message_id = buffer(offset, message_id_length)
+                offset = offset + message_id_length
+                varheader_subtree:add(f.publish_message_id, message_id)
             elseif(msgindex == 8 or msgindex == 10) then -- SUBSCRIBE & UNSUBSCRIBE
                 local varheader_subtree = subtree:add("Variable Header", nil)
 
                 local f_stream = f_tcp_stream().value
-                local version_num = mqtt_version_map[f_stream]
 
                 local message_id_length = 8
-                if (version_num ~= "13") then
-                    message_id_length = 2
-                end
                 local message_id = buffer(offset, message_id_length)
                 offset = offset + message_id_length
                 varheader_subtree:add(f.subscribe_message_id, message_id)
@@ -347,12 +345,8 @@ do
                 local varheader_subtree = subtree:add("Variable Header", nil)
 
                 local f_stream = f_tcp_stream().value
-                local version_num = mqtt_version_map[f_stream]
 
                 local message_id_length = 8
-                if (version_num ~= "13") then
-                    message_id_length = 2
-                end
                 local message_id = buffer(offset, message_id_length)
                 offset = offset + message_id_length
                 varheader_subtree:add(f.suback_message_id, message_id)
