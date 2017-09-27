@@ -33,6 +33,8 @@ do
 	-- Fix header: byte 2
 	f.remain_length = ProtoField.uint8("mqtt64.remain_length", "Remain Length")
 
+    -- common
+	f.common_len_uint16 = ProtoField.uint16("mqtt64.common.len", "Len")
 	-- Connect
 	f.connect_protocol_name = ProtoField.string("mqtt64.connect.protocol_name", "Protocol Name")
 	f.connect_protocol_version = ProtoField.uint8("mqtt64.connect.protocol_version", "Protocol Version")
@@ -243,28 +245,38 @@ do
 
                 local payload_subtree = subtree:add("Payload", nil)
                 -- Client ID
-                local clientid_len = buffer(offset, 2):uint()
+                local clientid_len = buffer(offset, 2)
                 offset = offset + 2
-                local clientid = buffer(offset, clientid_len)
-                offset = offset + clientid_len
-                payload_subtree:add(f.connect_payload_clientid, clientid)
+                local clientid = buffer(offset, clientid_len:uint())
+                offset = offset + clientid_len:uint()
+                local client_id_subtree = payload_subtree:add(f.connect_payload_clientid, clientid)
+                client_id_subtree:add(f.common_len_uint16, clientid_len)
                 -- Flags
                 if(flags:bitfield(0) == 1) then -- Username flag is true
-                    local username_len = buffer(offset, 2):uint()
+                    local username_len = buffer(offset, 2)
                     offset = offset + 2
-                    payload_subtree:add("username_len", tostring(username_len))
-                    local username = buffer(offset, username_len)
-                    offset = offset + username_len
-                    payload_subtree:add(f.connect_payload_username, username)
+                    local username = buffer(offset, username_len:uint())
+                    offset = offset + username_len:uint()
+                    local username_subtree = payload_subtree:add(f.connect_payload_username, username)
+                    username_subtree:add(f.common_len_uint16, username_len)
                 end
 
                 if(flags:bitfield(1) == 1) then -- Password flag is true
-                    local password_len = buffer(offset, 2):uint()
+                    local password_len = buffer(offset, 2)
                     offset = offset + 2
-                    payload_subtree:add("password_len", tostring(password_len))
-                    local password = buffer(offset, password_len)
-                    offset = offset + password_len
-                    payload_subtree:add(f.connect_payload_password, password)
+                    if(offset + password_len:uint() > buffer:len()) then
+                        local password = buffer(offset, buffer:len() - offset)
+                        offset = buffer:len()
+                        local password_subtree = payload_subtree:add(f.connect_payload_password, password)
+                        password_subtree:add(f.common_len_uint16, password_len)
+                        password_subtree:add("error", "buffer is not enough for left message")
+                    else
+
+                        local password = buffer(offset, password_len:uint())
+                        offset = offset + password_len:uint()
+                        local password_subtree = payload_subtree:add(f.connect_payload_password, password)
+                        password_subtree:add(f.common_len_uint16, password_len)
+                    end
                 end
 
             elseif(msgindex == 2) then -- CONNACK 
