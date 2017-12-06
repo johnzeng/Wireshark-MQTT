@@ -360,6 +360,7 @@ do
                 end
 
             elseif(msgindex == 9 or msgindex == 11) then -- SUBACK & UNSUBACK
+                local max_offset = offset + remain_length
                 local varheader_subtree = subtree:add("Variable Header", nil)
 
                 local message_id_length = 8
@@ -368,7 +369,7 @@ do
                 varheader_subtree:add(f.suback_message_id, message_id)
 
                 local payload_subtree = subtree:add("Payload", nil)
-                while(offset < buffer:len()) do
+                while(offset < max_offset) do
                     local qos = buffer(offset, 1)
                     offset = offset + 1
                     payload_subtree:add(f.suback_qos, qos);
