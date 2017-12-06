@@ -31,7 +31,8 @@ do
 	f.qos = ProtoField.uint8("mqtt64.qos", "QoS Level", base.DEC, nil, 0x06)
 	f.retain = ProtoField.uint8("mqtt64.retain", "Retain", base.DEC, nil, 0x01)
 	-- Fix header: byte 2
-	f.remain_length = ProtoField.uint8("mqtt64.remain_length", "Remain Length")
+	f.remain_length = ProtoField.uint32("mqtt64.remain_length", "Remain Length")
+	f.remain_length_data = ProtoField.bytes("mqtt64.remain_length_raw_data", "Remain Length raw data")
 
     -- common
 	f.common_len_uint16 = ProtoField.uint16("mqtt64.common.len", "Len")
@@ -55,6 +56,7 @@ do
 	-- Publish
 	f.publish_topic = ProtoField.string("mqtt64.publish.topic", "Topic")
 	f.topic_len = ProtoField.int16("mqtt64.publish.topic_len", "TopicLength")
+	f.topic_len_buffer = ProtoField.bytes("mqtt64.publish.topic_len_buffer", "TopicLengthRawData")
 	f.publish_message_id = ProtoField.uint64("mqtt64.publish.message_id", "Message ID")
 	f.publish_data = ProtoField.string("mqtt64.publish.data", "Data")
 
@@ -101,21 +103,25 @@ do
     new_publish_types[7] = f.ext_publish_apns_json
     new_publish_types[8] = f.ext_publish_third_party_push
 
-    local f_tcp_stream = Field.new("tcp.stream")
-
 	-- decoding of fixed header remaining length
 	-- according to MQTT V3.1
 	function lengthDecode(buffer, offset)
 		local multiplier = 1
 		local value = 0
 		local digit = 0
+        local success = true
+        local old_offset = offset
 		repeat
-			 digit = buffer(offset, 1):uint()
-			 offset = offset + 1
-			 value = value + bit32.band(digit,127) * multiplier
-			 multiplier = multiplier * 128
+            if buffer:len() == offset then
+                success = false
+                break
+            end
+            digit = buffer(offset, 1):uint()
+            offset = offset + 1
+            value = value + bit32.band(digit,127) * multiplier
+            multiplier = multiplier * 128
 		until (bit32.band(digit,128) == 0)
-		return offset, value
+		return success,offset,value,buffer(old_offset, offset - old_offset)
 	end
 
 	-- The dissector function
@@ -189,7 +195,12 @@ do
 
             offset = offset + 1
             local remain_length =0 
-            offset, remain_length = lengthDecode(buffer, offset)
+            len_success, offset, remain_length, buffer_data = lengthDecode(buffer, offset)
+            if not len_success or 
+                remain_length > buffer:len() - offset then
+                pinfo.desegment_len = DESEGMENT_ONE_MORE_SEGMENT
+                return
+            end
 
             local msgindex = msgtype:bitfield(0,4)
 
@@ -207,6 +218,7 @@ do
             fixheader_subtree:add(f.retain, msgtype)
 
             fixheader_subtree:add(f.remain_length, remain_length)
+            fixheader_subtree:add(f.remain_length_data, buffer_data)
 
             local fixhdr_qos = msgtype:bitfield(5,2)
             subtree:append_text(", QoS: " .. fixhdr_qos)
@@ -228,10 +240,6 @@ do
 
                 varheader_subtree:add(f.connect_protocol_name, name)
                 varheader_subtree:add(f.connect_protocol_version, version)
-
-                local f_stream = f_tcp_stream().value
-
-                global_mqtt_version = version
 
                 local flags_subtree = varheader_subtree:add("Flags", nil)
                 flags_subtree:add(f.connect_username, flags)
@@ -292,12 +300,13 @@ do
                 local flags_subtree = varheader_subtree:add(f.connack_status_code, connect_return_code)
 
             elseif(msgindex == 3) then -- PUBLISH
-                local f_stream = f_tcp_stream().value
-
                 local varhdr_init = offset -- For calculating variable header size
                 local varheader_subtree = subtree:add("Variable Header", nil)
 
-                local topic_len = buffer(offset, 2):uint()
+                local topic_len_raw = buffer(offset, 2)
+                local topic_len = topic_len_raw:uint()
+                varheader_subtree:add(f.topic_len_buffer, topic_len_raw)
+                varheader_subtree:add(f.topic_len, topic_len)
                 offset = offset + 2
                 local topic = buffer(offset, topic_len)
                 offset = offset + topic_len
@@ -318,7 +327,6 @@ do
                 offset = offset + data_len
                 payload_subtree:add(f.publish_data, data)
             elseif(msgindex == 4 or msgindex == 5 or msgindex == 6 or msgindex == 7) then -- PUBACK or PUBREC or PUBREL or PUBCOMP
-                local f_stream = f_tcp_stream().value
 
                 local varhdr_init = offset -- For calculating variable header size
                 local varheader_subtree = subtree:add("Variable Header", nil)
@@ -329,8 +337,6 @@ do
                 varheader_subtree:add(f.publish_message_id, message_id)
             elseif(msgindex == 8 or msgindex == 10) then -- SUBSCRIBE & UNSUBSCRIBE
                 local varheader_subtree = subtree:add("Variable Header", nil)
-
-                local f_stream = f_tcp_stream().value
 
                 local message_id_length = 8
                 local message_id = buffer(offset, message_id_length)
@@ -355,8 +361,6 @@ do
 
             elseif(msgindex == 9 or msgindex == 11) then -- SUBACK & UNSUBACK
                 local varheader_subtree = subtree:add("Variable Header", nil)
-
-                local f_stream = f_tcp_stream().value
 
                 local message_id_length = 8
                 local message_id = buffer(offset, message_id_length)
